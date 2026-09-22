@@ -68,7 +68,7 @@ def export_yolo_raw_graph(
         example_inputs,
     )
 
-    graph_model = exported_program.module().eval()
+    graph_model = exported_program.module()
 
     return exported_program, graph_model, fp32_model, example_inputs
 

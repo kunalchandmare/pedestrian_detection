@@ -11,4 +11,5 @@ def load_model(model_dir:str):
     else:
         raise FileNotFoundError(f"YOLO weights not found: {model_dir}")
 
-    return yolo_model
+    raw_model = yolo_model.model.float().cpu().eval()
+    return raw_model
