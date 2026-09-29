@@ -9,3 +9,4 @@ ultralytics>=8.0
 pytest
 torchao==0.18.0+cpu
 torchinfo==1.8.0
+tqdm

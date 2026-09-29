@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from shared.yolo_helper import load_model
+from shared.data_loader import get_loader
 
 
 @pytest.fixture(scope="module")
@@ -17,3 +18,8 @@ def example_input():
             dtype=torch.float32,
         ),
     )
+
+@pytest.fixture(scope="module")
+def calibration_loader():
+    calibration_dir = "data/calibration"
+    return get_loader(data_dir=calibration_dir)

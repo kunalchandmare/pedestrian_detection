@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import torchao
 import copy
 from torchao.quantization.pt2e.quantize_pt2e import prepare_pt2e, convert_pt2e
@@ -6,6 +7,7 @@ import torchao.quantization.pt2e.quantizer.x86_inductor_quantizer as xiq
 from torchao.quantization.pt2e.quantizer.x86_inductor_quantizer import (
     X86InductorQuantizer,
 )
+from tqdm import tqdm
 
 print(torch.__version__)
 print(torchao.__version__)
@@ -20,19 +22,40 @@ DEVICE = "cpu"
 @torch.inference_mode()
 def calibrate(prepared_model, calibration_loader, max_batches):
     prepared_model.eval()
+    total = len(calibration_loader)
 
-    for batch_index, batch in enumerate(calibration_loader):
-        if batch_index >= max_batches:
+    for batch_index, batch in enumerate(calibration_loader): #, total=total, desc="Calibrating")):
+
+        if max_batches is not None and batch_index >= max_batches:
             break
 
         # Supports loaders yielding images only or (images, targets, ...)
         images = batch[0] if isinstance(batch, (tuple, list)) else batch
-        images = images.to(DEVICE, dtype=torch.float32)
+
+        if not all(isinstance(image, torch.Tensor) for image in images):
+            raise TypeError("Expected a tuple of image tensors")
+
+        resized = [
+            F.interpolate(
+                image.unsqueeze(0).float(),
+                size=(640, 640),
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(0)
+            for image in images
+        ]
+
+        # Changes a tuple of 10 tensors shaped [3, H, W] into one tensor shaped [10, 3, H, W].
+        # It works only if all images in that batch have the same height and width.
+        image_batch = torch.stack(resized).to(DEVICE, dtype=torch.float32)
+        assert image_batch.ndim == 4
+        assert image_batch.shape[1:] == (3, 640, 640), image_batch.shape
+
+        print("Calling model with:", tuple(image_batch.shape), flush=True)
 
         # Ensure loader preprocessing already produces [B, 3, 640, 640].
-        prepared_model(images)
+        prepared_model(image_batch)
 
-    print(f"Calibrated using {min(batch_index + 1, max_batches)} batches.")
 
 
 def export_yolo_raw_graph(
