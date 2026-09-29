@@ -54,7 +54,7 @@ def export_yolo_raw_graph(
         fp32_model: The original raw YOLO nn.Module in eval mode.
         example_inputs: Tuple containing input tensor [B, 3, H, W].
     """
-    fp32_model = copy.deepcopy(yolo_model.model).float().cpu().eval()
+    fp32_model = copy.deepcopy(yolo_model)
 
     example_inputs = (
         torch.zeros(
