@@ -1,4 +1,4 @@
-from src.quantization.quantize import calibrate, export_yolo_raw_graph
+from src.quantization.quantize import calibrate, export_yolo_raw_graph, quantize_yolo_int8
 
 
 def test_export_yolo_raw_graph(yolo_model):
@@ -15,4 +15,7 @@ def test_calibrate_one_batch(yolo_model, calibration_loader):
 
 
 def test_quantize_yolo_int8(yolo_model, calibration_loader):
-    pass
+    try:
+        quantize_yolo_int8(yolo_model, calibration_loader,batch_size=1, max_calibration_batches=1,image_size=640)
+    except Exception as e:
+        assert False, f"Failed to Quantize model to INT8 : {e}"

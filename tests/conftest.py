@@ -22,4 +22,4 @@ def example_input():
 @pytest.fixture(scope="module")
 def calibration_loader():
     calibration_dir = "data/calibration"
-    return get_loader(data_dir=calibration_dir)
+    return get_loader(data_dir=calibration_dir, batch_size=1)

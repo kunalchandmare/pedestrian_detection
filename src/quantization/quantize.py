@@ -7,6 +7,7 @@ import torchao.quantization.pt2e.quantizer.x86_inductor_quantizer as xiq
 from torchao.quantization.pt2e.quantizer.x86_inductor_quantizer import (
     X86InductorQuantizer,
 )
+from torchao.quantization.pt2e import move_exported_model_to_eval
 from tqdm import tqdm
 
 print(torch.__version__)
@@ -21,7 +22,7 @@ DEVICE = "cpu"
 
 @torch.inference_mode()
 def calibrate(prepared_model, calibration_loader, max_batches):
-    prepared_model.eval()
+
     total = len(calibration_loader)
 
     for batch_index, batch in enumerate(calibration_loader): #, total=total, desc="Calibrating")):
@@ -131,17 +132,18 @@ def quantize_yolo_int8(
     )
 
     # 3. Insert observers and fold eligible Conv-BN patterns.
-    prepared_model = prepare_pt2e(graph_model, quantizer).eval()
+    prepared_model = prepare_pt2e(graph_model, quantizer)
+    move_exported_model_to_eval(prepared_model)
 
     # 4. Your calibration loop forwards representative image batches
     #    through prepared_model, allowing observers to collect ranges.
     calibrate(
-        model=prepared_model,
+        prepared_model=prepared_model,
         calibration_loader=calibration_loader,
         max_batches=max_calibration_batches,
     )
 
     # 5. Replace observers with quantize/dequantize operations.
-    model_int8 = convert_pt2e(prepared_model).eval()
+    model_int8 = convert_pt2e(prepared_model)
 
     return model_int8, fp32_model, example_inputs
