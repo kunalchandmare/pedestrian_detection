@@ -1,3 +1,4 @@
+from src.analysis.model_stats import inspect_model, inference_time
 from src.quantization.quantize import calibrate, export_yolo_raw_graph, quantize_yolo_int8
 
 
@@ -16,6 +17,13 @@ def test_calibrate_one_batch(yolo_model, calibration_loader):
 
 def test_quantize_yolo_int8(yolo_model, calibration_loader):
     try:
-        quantize_yolo_int8(yolo_model, calibration_loader,batch_size=1, max_calibration_batches=1,image_size=640)
+         model_int8,fp32_model, example_inputs = quantize_yolo_int8(yolo_model, calibration_loader,batch_size=1, max_calibration_batches=1,image_size=640)
     except Exception as e:
         assert False, f"Failed to Quantize model to INT8 : {e}"
+
+    inspect_model("FP32 model", fp32_model)
+    inspect_model("Converted PT2E model", model_int8)
+
+    print("\nExport example input shape:", tuple(example_inputs[0].shape))
+
+    inference_time(model_int8,fp32_model, example_inputs)
