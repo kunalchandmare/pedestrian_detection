@@ -96,21 +96,23 @@ class PT2EYOLOBenchmarkAdapter(nn.Module):
             results.append({
                 "boxes": boxes,
                 "scores": detections[:, 4].clone(),
-                "labels": detections[:, 5].long(),
+                "labels": detections[:, 5].long()+1,
             })
         return results
 
 
 if __name__ == "__main__":
     # Run from the repository root. Adjust the PT2 artifact path as needed.
-    adapter = PT2EYOLOBenchmarkAdapter("model_int8_qdq.pt2")
+    adapter = PT2EYOLOBenchmarkAdapter("results/checkpoint/pt2e/torch_x86_int8.pt2",
+                                       conf_threshold=0.5,
+                                       iou_threshold=0.5)
     adapter.eval()
     sample = torch.zeros((3, 640, 640), dtype=torch.float32)
     output = adapter([sample])
     assert len(output) == 1 and set(output[0]) == {"boxes", "scores", "labels"}
     assert output[0]["boxes"].shape[1] == 4
     print({key: tuple(val.shape) for key, val in output[0].items()})
-    torch.save(adapter, "model_int8_benchmark.pt")
+    torch.save(adapter, "results/benchmark/torch_x86_int8_benchmark.pt")
     # For your own trusted artifact, if your PyTorch version defaults to
     # weights_only=True: torch.load('model_int8_benchmark.pt', weights_only=False)
     print("Wrote model_int8_benchmark.pt")

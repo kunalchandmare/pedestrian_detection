@@ -3,6 +3,8 @@ from pathlib import Path
 import torch
 from ultralytics import YOLO
 
+from src.benchmark.pt2e_yolo_benchmark_adapter import PT2EYOLOBenchmarkAdapter
+
 
 def load_model(model_dir:str):
     """
@@ -75,6 +77,19 @@ def save_pt2e_model(model_int8, example_inputs, out_path):
     exported_program = torch.export.export(model_int8, inputs)
     torch.export.save(exported_program, str(out_path))
     return out_path
+
+def save_pt_yolo_adaptor(pt2_dir,pt_ot_dir):
+    adapter = PT2EYOLOBenchmarkAdapter(
+        pt2_dir,
+        image_size=640,
+        num_classes=10,
+    ).eval()
+
+    print(PT2EYOLOBenchmarkAdapter.__module__)
+    # Must print: benchmark.pt2e_yolo_benchmark_adapter
+    # Must NOT print: __main__ or main
+
+    torch.save(adapter, pt_ot_dir)
 
 
 
