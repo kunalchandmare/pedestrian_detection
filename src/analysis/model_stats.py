@@ -85,7 +85,19 @@ def params_stats(model, example_input_size, verbose=1 ) -> list[tuple[str, str]]
 
 
 
-def inspect_model(name, model):
+def quant_inspect_model(name, model):
+    """
+              ┌── DQ₁ ──→ operation A
+FP32 ── Q ────┤
+              └── DQ₂ ──→ operation B
+    Inspect and analyze the quantization and state of a PyTorch model.
+
+    This function evaluates the properties and state of a given PyTorch model,
+    with a focus on assessing quantization-related aspects such as tensor data
+    types and the memory usage of model state. It also analyzes the model's
+    graph to count and identify quantization operations if the model has a
+    graph attribute.
+    """
     weights = [
         param for param_name, param in model.named_parameters()
         if param_name.endswith("weight")
@@ -93,8 +105,8 @@ def inspect_model(name, model):
     state = model.state_dict()
 
     print(f"\n{name}")
-    print("Weight dtypes:", Counter(str(w.dtype) for w in weights))
-    print("All parameter dtypes:",
+    print("Weight Tensors dtypes:", Counter(str(w.dtype) for w in weights))
+    print("Parameter Tensors dtypes:",
           Counter(str(p.dtype) for p in model.parameters()))
     print("Stored state tensor size:",
           round(sum(t.numel() * t.element_size()
@@ -106,12 +118,12 @@ def inspect_model(name, model):
         quant_ops = [
             str(node.target)
             for node in model.graph.nodes
-            if "quantiz" in str(node.target).lower()
+                if "quantiz" in str(node.target).lower()
         ]
         print("Quantization ops:", len(quant_ops))
         print("Examples:", quant_ops[:6])
 
-def benchmark(model, x, warmup=5, repeats=30):
+def time_ms(model, x, warmup=5, repeats=30):
     with torch.inference_mode():
         for _ in range(warmup):
             model(x)
@@ -124,22 +136,67 @@ def benchmark(model, x, warmup=5, repeats=30):
 
     return statistics.median(times_ms)
 
-def inference_time(model_int8, fp32_model, example_inputs):
+def inference_time(model_int8, fp32_model, example_inputs, device="cpu"):
 
-    x = example_inputs[0].detach().to("cpu", dtype=torch.float32)
+    x = example_inputs[0].detach().to(device, dtype=torch.float32)
     assert tuple(x.shape) == (1, 3, 640, 640)
 
     # fp32_model is the original, non-exported YOLO DetectionModel.
     fp32_model = fp32_model.cpu().eval()
     model_int8 = model_int8.cpu()  # Do NOT call ordinary .eval() on an exported model.
 
-    fp32_compiled = torch.compile(fp32_model, backend="inductor")
-    int8_compiled = torch.compile(model_int8, backend="inductor")
+    #Need C++ compiler with VS Build V19 above 16.11 toolset (currently not available so compile fails)
+    #fp32_compiled = torch.compile(fp32_model, backend="inductor")
+    #int8_compiled = torch.compile(model_int8, backend="inductor")
 
 
-    fp32_ms = benchmark(fp32_compiled, x)
-    int8_ms = benchmark(int8_compiled, x)
+    fp32_ms = time_ms(fp32_model, x)
+    int8_ms = time_ms(model_int8, x)
 
-    print(f"Compiled FP32: {fp32_ms:.2f} ms/image")
-    print(f"Compiled INT8: {int8_ms:.2f} ms/image")
+    print(f"FP32 Model: {fp32_ms:.2f} ms/image")
+    print(f"INT8 Quant Model: {int8_ms:.2f} ms/image")
     print(f"Speedup: {fp32_ms / int8_ms:.2f}x")
+
+def describe_output(output, label):
+    print(f"\n{label}: {type(output).__name__}")
+    if isinstance(output, torch.Tensor):
+        print("  shape:", tuple(output.shape), "dtype:", output.dtype)
+    elif isinstance(output, (tuple, list)):
+        for i, item in enumerate(output):
+            describe_output(item, f"{label}[{i}]")
+    elif isinstance(output, dict):
+        for key, item in output.items():
+            describe_output(item, f"{label}[{key!r}]")
+    else:
+        print("  value type:", type(output).__name__)
+
+
+def inference_raw_out(model, example_input, device="cpu"):
+
+    assert tuple(example_input.shape) == (1, 3, 640, 640) # Expected shape: (1, 3, 640, 640)
+
+    #model.eval()
+
+    with torch.inference_mode():
+        raw_int8 = model(example_input)
+
+    return raw_int8
+
+def check_outputs(model_int8, fp32_model, example_inputs, device="cpu"):
+
+    x = example_inputs[0] if isinstance(example_inputs, tuple) else example_inputs
+
+    raw_fp32 = inference_raw_out(fp32_model,x)
+    raw_int8 = inference_raw_out(model_int8,x)
+
+    describe_output(raw_fp32, "FP32")
+    describe_output(raw_int8, "INT8-converted")
+
+    fp = raw_fp32[0]
+    q = raw_int8[0]
+
+    print("Shapes:", fp.shape, q.shape)
+    print("Mean absolute difference:", (fp - q).abs().mean().item())
+    print("Max absolute difference:", (fp - q).abs().max().item())
+    print("FP32 finite:", torch.isfinite(fp).all().item())
+    print("Converted finite:", torch.isfinite(q).all().item())

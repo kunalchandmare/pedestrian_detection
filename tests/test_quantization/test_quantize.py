@@ -1,4 +1,6 @@
-from src.analysis.model_stats import inspect_model, inference_time
+import torch
+
+from src.analysis.model_stats import quant_inspect_model, inference_time, check_outputs, inference_raw_out
 from src.quantization.quantize import calibrate, export_yolo_raw_graph, quantize_yolo_int8
 
 
@@ -21,9 +23,28 @@ def test_quantize_yolo_int8(yolo_model, calibration_loader):
     except Exception as e:
         assert False, f"Failed to Quantize model to INT8 : {e}"
 
-    inspect_model("FP32 model", fp32_model)
-    inspect_model("Converted PT2E model", model_int8)
+    quant_inspect_model("FP32 model", fp32_model)
+    quant_inspect_model("Converted PT2E model", model_int8)
 
-    print("\nExport example input shape:", tuple(example_inputs[0].shape))
+    assert isinstance(example_inputs, tuple)
+    assert isinstance(example_inputs[0], torch.Tensor)
+    assert tuple(example_inputs[0].shape) == (1, 3, 640, 640)
 
-    inference_time(model_int8,fp32_model, example_inputs)
+    x = example_inputs[0]
+
+    raw_fp32 = inference_raw_out(fp32_model, x)
+    raw_int8 = inference_raw_out(model_int8, x)
+
+    assert isinstance(raw_fp32, tuple)
+    assert isinstance(raw_int8, tuple)
+
+    # Checking raw output box, score prediction tensor shape
+    for branch in ("one2many", "one2one"):
+        for item in ("boxes", "scores"):
+            fp32_shape = raw_fp32[1][branch][item].shape
+            int8_shape = raw_int8[1][branch][item].shape
+
+            assert fp32_shape == int8_shape, (
+                f"{branch} {item}: {fp32_shape} != {int8_shape}"
+            )
+            print(f"{branch} {item}: {tuple(fp32_shape)} ✓")

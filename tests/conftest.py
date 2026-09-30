@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from shared.yolo_helper import load_model
+from shared.model_helper import load_model
 from shared.data_loader import get_loader
 
 

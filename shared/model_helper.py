@@ -32,3 +32,4 @@ def load_model(model_dir:str):
 
     raw_model = yolo_model.model.float().cpu().eval()
     return raw_model
+
