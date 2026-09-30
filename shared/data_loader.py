@@ -8,8 +8,8 @@ import random
 import numpy as np
 import cv2
 import torch
-import torchvision.transforms.functional as TF
 from torch.utils.data import Dataset, DataLoader
+from ultralytics.data.augment import LetterBox
 
 CLASSES = [
     "car", "traffic sign", "traffic light", "person", "truck",
@@ -107,3 +107,24 @@ def get_loader(data_dir, batch_size=10, workers=0):
     train_loader = DataLoader(data_set, batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True, collate_fn=collate_fn)
 
     return train_loader
+
+
+def preprocess_yolo_image(image: torch.Tensor) -> torch.Tensor:
+    """CHW RGB float [0, 1] -> BCHW RGB float [0, 1], letterboxed to 640."""
+    if image.ndim != 3 or image.shape[0] != 3:
+        raise ValueError(f"Expected CHW RGB image, got {tuple(image.shape)}")
+
+    # Undo the dataset loader's /255 and RGB conversion for LetterBox.
+    rgb = image.detach().cpu().permute(1, 2, 0).numpy()
+    rgb_u8 = np.clip(np.rint(rgb * 255.0), 0, 255).astype(np.uint8)
+    bgr_u8 = np.ascontiguousarray(rgb_u8[:, :, ::-1])
+
+    padded_bgr = LetterBox(
+        new_shape=(640, 640),
+        auto=False,
+    )(image=bgr_u8)
+
+    rgb_chw = np.ascontiguousarray(
+        padded_bgr[:, :, ::-1].transpose(2, 0, 1)
+    )
+    return torch.from_numpy(rgb_chw).unsqueeze(0).float() / 255.0

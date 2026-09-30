@@ -8,6 +8,9 @@ from torchao.quantization.pt2e.quantizer.x86_inductor_quantizer import (
     X86InductorQuantizer,
 )
 from torchao.quantization.pt2e import move_exported_model_to_eval
+
+from shared.data_loader import preprocess_yolo_image
+
 '''
 This script is adapted from the official PyTorch documentation:
 https://pytorch.org/tutorials/advanced/static_quantization_tutorial.html'''
@@ -24,9 +27,9 @@ DEVICE = "cpu"
 
 @torch.inference_mode()
 def calibrate(prepared_model, calibration_loader, max_batches):
-
+    images_seen = 0
     total = len(calibration_loader)
-
+    device = next(prepared_model.parameters()).device
     for batch_index, batch in enumerate(calibration_loader): #, total=total, desc="Calibrating")):
 
         if max_batches is not None and batch_index >= max_batches:
@@ -38,26 +41,17 @@ def calibrate(prepared_model, calibration_loader, max_batches):
         if not all(isinstance(image, torch.Tensor) for image in images):
             raise TypeError("Expected a tuple of image tensors")
 
-        resized = [
-            F.interpolate(
-                image.unsqueeze(0).float(),
-                size=(640, 640),
-                mode="bilinear",
-                align_corners=False,
-            ).squeeze(0)
-            for image in images
-        ]
+        for image in images:
+            x = preprocess_yolo_image(image).to(device)
 
-        # Changes a tuple of 10 tensors shaped [3, H, W] into one tensor shaped [10, 3, H, W].
-        # It works only if all images in that batch have the same height and width.
-        image_batch = torch.stack(resized).to(DEVICE, dtype=torch.float32)
-        assert image_batch.ndim == 4
-        assert image_batch.shape[1:] == (3, 640, 640), image_batch.shape
+            assert x.shape == (1, 3, 640, 640), x.shape
+            prepared_model(x)
+            images_seen += 1
 
-        print("Calling model with:", tuple(image_batch.shape), flush=True)
+        if images_seen == 0:
+            raise ValueError("No images were used for calibration")
 
-        # Ensure loader preprocessing already produces [B, 3, 640, 640].
-        prepared_model(image_batch)
+    print(f"Calibrated on {images_seen} images")
 
 
 

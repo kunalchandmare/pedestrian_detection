@@ -1,5 +1,8 @@
+from pathlib import Path
+
 import torch
 
+from shared.model_helper import save_pt2e_model
 from src.analysis.model_stats import quant_inspect_model, inference_time, check_outputs, inference_raw_out
 from src.quantization.torch_pt2e_quant import calibrate, export_yolo_raw_graph, quantize_yolo_int8
 
@@ -48,3 +51,11 @@ def test_quantize_yolo_int8(yolo_model, calibration_loader):
                 f"{branch} {item}: {fp32_shape} != {int8_shape}"
             )
             print(f"{branch} {item}: {tuple(fp32_shape)} ✓")
+
+    pt_path = "results/checkpoint/pt2e/torch_x86_int8.pt2"
+    save_pt2e_model(model_int8, example_inputs, pt_path)
+
+    pt_file = Path(pt_path)
+    assert pt_file.exists()
+    assert pt_file.is_file()
+    assert pt_file.name == "torch_x86_int8.pt2"
