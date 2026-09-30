@@ -1,7 +1,7 @@
 import torch
 
 from src.analysis.model_stats import quant_inspect_model, inference_time, check_outputs, inference_raw_out
-from src.quantization.quantize import calibrate, export_yolo_raw_graph, quantize_yolo_int8
+from src.quantization.torch_pt2e_quant import calibrate, export_yolo_raw_graph, quantize_yolo_int8
 
 
 def test_export_yolo_raw_graph(yolo_model):

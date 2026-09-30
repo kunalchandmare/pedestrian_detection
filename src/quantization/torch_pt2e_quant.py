@@ -8,7 +8,9 @@ from torchao.quantization.pt2e.quantizer.x86_inductor_quantizer import (
     X86InductorQuantizer,
 )
 from torchao.quantization.pt2e import move_exported_model_to_eval
-from tqdm import tqdm
+'''
+This script is adapted from the official PyTorch documentation:
+https://pytorch.org/tutorials/advanced/static_quantization_tutorial.html'''
 
 print(torch.__version__)
 print(torchao.__version__)
