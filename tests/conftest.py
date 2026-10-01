@@ -4,14 +4,20 @@ import pytest
 import torch
 
 from shared.model_helper import load_model
-from shared.data_loader import get_loader
+from shared.data_loader import get_loader, BDDDetectionDataset
 from src.benchmark.onnx_yolo_benchmark_adapter import OnnxYoloBenchmarkAdapter
 from src.benchmark.pt2e_yolo_benchmark_adapter import PT2EYOLOBenchmarkAdapter
+from src.benchmark.yolo_adapter import YoloBenchmarkAdapter
 
 
 @pytest.fixture(scope="module")
 def yolo_wt_path():
     m_path = "results/checkpoint/yolo/epoch52_main.pt"
+    return Path(m_path)
+
+@pytest.fixture(scope="module")
+def data_dir_path():
+    m_path = "data/calibration"
     return Path(m_path)
 
 @pytest.fixture(scope="module")
@@ -21,6 +27,19 @@ def yolo_model(yolo_wt_path):
 @pytest.fixture(scope="module")
 def image():
     return torch.rand(3, 640, 640, dtype=torch.float32)
+
+@pytest.fixture(scope="module")
+def real_image(data_dir_path):
+    dataset = BDDDetectionDataset(data_dir_path, max_images=1)
+
+    assert len(dataset) == 1, "No annotated image found in BDD_DATA_DIR"
+
+    img, _target = dataset[0]
+    assert img.dtype == torch.float32
+    assert img.ndim == 3 and img.shape[0] == 3  # CHW
+    assert 0.0 <= img.min().item() <= img.max().item() <= 1.0
+
+    return img
 
 @pytest.fixture(scope="module")
 def example_batch_input():

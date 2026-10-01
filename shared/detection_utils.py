@@ -28,6 +28,7 @@ from src.benchmark.onnx_yolo_benchmark_adapter import (
 from src.benchmark.pt2e_yolo_benchmark_adapter import (
     PT2EYOLOBenchmarkAdapter,
 )
+from src.benchmark.yolo_adapter import YoloBenchmarkAdapter, YoloBenchmarkAdapterPortable
 
 # ============================================================================
 # CLASSES
@@ -85,33 +86,24 @@ def build_model(num_classes: int = NUM_CLASSES, pretrained: bool = True):
     return model
 
 
-def load_detection_model(path):
-    suffix = Path(path).suffix.lower()
+def load_detection_model(model_path):
+    model_path = Path(model_path)
+    suffix = model_path.suffix.lower()
+
+    if suffix == ".pt":
+        return YoloBenchmarkAdapter(yolo_weights_path=str(model_path)).eval()
 
     if suffix == ".onnx":
-        return OnnxYoloBenchmarkAdapter(path).eval()
+        return OnnxYoloBenchmarkAdapter(model_path).eval()
 
     if suffix == ".pt2":
         return PT2EYOLOBenchmarkAdapter(
-            pt2_path=path,
+            pt2_path=str(model_path),
             image_size=640,
             num_classes=len(CLASSES),
         ).eval()
 
-    if suffix != ".pt":
-        raise ValueError(f"Unsupported model format: {suffix}")
-    """Load a detector saved as a full model (recommended) or a state dict."""
-    obj = torch.load(path, map_location="cpu", weights_only=False)
-    if isinstance(obj, dict) and "state_dict" in obj:
-        model = build_model(obj.get("num_classes", NUM_CLASSES), pretrained=False)
-        model.load_state_dict(obj["state_dict"])
-    elif isinstance(obj, dict):
-        model = build_model(NUM_CLASSES, pretrained=False)
-        model.load_state_dict(obj)
-    else:
-        model = obj
-    model.eval()
-    return model
+    raise ValueError(f"Unsupported model format: {suffix}")
 
 
 def count_params(model) -> int:

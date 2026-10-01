@@ -27,9 +27,8 @@ import pandas as pd
 import cv2
 import torch
 import streamlit as st
-from pt2e_yolo_benchmark_adapter import PT2EYOLOBenchmarkAdapter
 # this file lives in  Students/testbenchmark/  ->  parent.parent is  Students/
-STUDENT_DIR = Path(__file__).resolve().parent.parent
+STUDENT_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(STUDENT_DIR))
 from shared.detection_utils import (  # noqa: E402
     load_detection_model, evaluate_detections, calculate_scores, count_params,
@@ -194,8 +193,8 @@ def main():
             predictions = run_inference(model, images, log=st.write)
         except Exception as e:
             status.update(label="Failed", state="error")
-            st.error(f"Inference failed - does your model return "
-                     f"list of {{boxes, labels, scores}}?\n\n{e}")
+            st.error("Benchmark failed")
+            st.exception(e)
             return
 
         status.update(label="Scoring...")

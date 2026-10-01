@@ -1,8 +1,10 @@
 # tests/test_benchmark/test_onnx_yolo_benchmark_adapter.py
-
+import numpy as np
 import torch
+from torchvision.ops import box_iou
 
 from shared.model_helper import export_yolo_fp32_onnx
+from src.benchmark.yolo_adapter import YoloBenchmarkAdapterPortable
 from tests.conftest import yolo_wt_path
 
 
@@ -61,3 +63,61 @@ def test_adapter_uses_one_based_class_labels(onnx_adapter, image):
     if labels.numel():
         assert (labels >= 1).all()
         assert (labels <= 10).all()
+
+def test_fp32_onnx_matches_pytorch(
+    yolo_model, onnx_fp32_adapter, example_batch_input
+):
+    x = example_batch_input[0]  # Tensor of shape (1, 3, 640, 640)
+
+    with torch.inference_mode():
+        pytorch_output = yolo_model(x)
+
+    if isinstance(pytorch_output, (tuple, list)):
+        pytorch_output = pytorch_output[0]
+
+    onnx_output = onnx_fp32_adapter.session.run(
+        None,
+        {onnx_fp32_adapter.input_name: x.numpy()},
+    )[0]
+
+    torch.testing.assert_close(
+        pytorch_output.cpu(),
+        torch.from_numpy(onnx_output),
+        rtol=1e-3,
+        atol=1e-3,
+    )
+
+def test_onnx_vs_original_detections(
+            yolo_wt_path,
+            onnx_fp32_adapter,
+            real_image,  # Fixture: ONE real CHW [0,1] benchmark image.
+    ):
+        original = YoloBenchmarkAdapterPortable(str(yolo_wt_path)).eval()
+
+        with torch.inference_mode():
+            pt = original([real_image])[0]
+            ox = onnx_fp32_adapter([real_image])[0]
+
+        print(f"\nOriginal detections: {len(pt['scores'])}")
+        print(f"ONNX detections:     {len(ox['scores'])}")
+
+        # Compare the highest-confidence detection from each adapter.
+        assert len(pt["scores"]) > 0, "Choose an image with a detection"
+        assert len(ox["scores"]) > 0, "ONNX found no detections"
+
+        pt_top = pt["scores"].argmax().item()
+        ox_top = ox["scores"].argmax().item()
+
+        iou = box_iou(
+            pt["boxes"][pt_top: pt_top + 1],
+            ox["boxes"][ox_top: ox_top + 1],
+        )[0, 0].item()
+
+        print(f"Top-box IoU: {iou:.3f}")
+        print(f"Top labels:  original={pt['labels'][pt_top].item()}, "
+              f"ONNX={ox['labels'][ox_top].item()}")
+        print(f"Top scores:  original={pt['scores'][pt_top].item():.3f}, "
+              f"ONNX={ox['scores'][ox_top].item():.3f}")
+
+        assert pt["labels"][pt_top] == ox["labels"][ox_top]
+        assert iou > 0.9
