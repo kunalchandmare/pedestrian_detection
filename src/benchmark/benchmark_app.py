@@ -37,7 +37,7 @@ from shared.detection_utils import (  # noqa: E402
 )
 
 DATA_DIR = Path("data/calibration")
-MODELS_DIR = Path("results/benchmark")
+MODELS_DIR = Path("results")
 
 RANDOM_SEED = 42
 BENCHMARK_EVAL_SIZE = 200      # self-check sample (smaller than the moderator)
@@ -149,7 +149,7 @@ def main():
                         "or enter a path below.")
         model_path = st.sidebar.text_input("Model path")
 
-    uploaded = st.sidebar.file_uploader("Or upload a model", type=["pt"])
+    uploaded = st.sidebar.file_uploader("Or upload a model", type=["pt","pt2", "onnx"])
     if uploaded:
         model_path = str(MODELS_DIR / uploaded.name)
         with open(model_path, "wb") as f:

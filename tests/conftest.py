@@ -1,15 +1,22 @@
+from pathlib import Path
+
 import pytest
 import torch
 
 from shared.model_helper import load_model
 from shared.data_loader import get_loader
+from src.benchmark.onnx_yolo_benchmark_adapter import OnnxYoloBenchmarkAdapter
 from src.benchmark.pt2e_yolo_benchmark_adapter import PT2EYOLOBenchmarkAdapter
 
 
 @pytest.fixture(scope="module")
-def yolo_model():
+def yolo_wt_path():
     m_path = "results/checkpoint/yolo/epoch52_main.pt"
-    return load_model(m_path)
+    return Path(m_path)
+
+@pytest.fixture(scope="module")
+def yolo_model(yolo_wt_path):
+    return load_model(str(yolo_wt_path))
 
 @pytest.fixture(scope="module")
 def image():
@@ -34,3 +41,22 @@ def pt2e_adapter():
     model_int8_dir = "results/checkpoint/pt2e/torch_x86_int8.pt2"
     adapter = PT2EYOLOBenchmarkAdapter(pt2_path=model_int8_dir)
     return adapter
+
+@pytest.fixture(scope="session")
+def onnx_fp32_path():
+    path = Path("results/onnx/yolo_fp32.onnx")
+    return path
+
+
+@pytest.fixture(scope="session")
+def onnx_int8_path():
+    path = Path("results/onnx/yolo_int8.onnx")
+    return path
+
+
+@pytest.fixture(scope="module")
+def onnx_fp32_adapter(onnx_fp32_path):
+    assert onnx_fp32_path.is_file(), (
+        f"ONNX model not found: {onnx_fp32_path.resolve()}"
+    )
+    return OnnxYoloBenchmarkAdapter(onnx_fp32_path).eval()

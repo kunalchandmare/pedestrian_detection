@@ -22,7 +22,12 @@ from torchvision.models.detection import fasterrcnn_mobilenet_v3_large_fpn
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.ops import box_iou
 
-from src.benchmark.pt2e_yolo_benchmark_adapter import PT2EYOLOBenchmarkAdapter
+from src.benchmark.onnx_yolo_benchmark_adapter import (
+    OnnxYoloBenchmarkAdapter,
+)
+from src.benchmark.pt2e_yolo_benchmark_adapter import (
+    PT2EYOLOBenchmarkAdapter,
+)
 
 # ============================================================================
 # CLASSES
@@ -81,6 +86,20 @@ def build_model(num_classes: int = NUM_CLASSES, pretrained: bool = True):
 
 
 def load_detection_model(path):
+    suffix = Path(path).suffix.lower()
+
+    if suffix == ".onnx":
+        return OnnxYoloBenchmarkAdapter(path).eval()
+
+    if suffix == ".pt2":
+        return PT2EYOLOBenchmarkAdapter(
+            pt2_path=path,
+            image_size=640,
+            num_classes=len(CLASSES),
+        ).eval()
+
+    if suffix != ".pt":
+        raise ValueError(f"Unsupported model format: {suffix}")
     """Load a detector saved as a full model (recommended) or a state dict."""
     obj = torch.load(path, map_location="cpu", weights_only=False)
     if isinstance(obj, dict) and "state_dict" in obj:

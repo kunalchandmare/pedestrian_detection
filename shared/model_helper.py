@@ -2,6 +2,7 @@ from pathlib import Path
 
 import torch
 from ultralytics import YOLO
+import onnxruntime as ort
 
 from src.benchmark.pt2e_yolo_benchmark_adapter import PT2EYOLOBenchmarkAdapter
 
@@ -90,6 +91,31 @@ def save_pt_yolo_adaptor(pt2_dir,pt_ot_dir):
     # Must NOT print: __main__ or main
 
     torch.save(adapter, pt_ot_dir)
+
+WEIGHTS = Path("results/checkpoint/yolo/model.pt")
+FP32_ONNX = Path("results/onnx/yolo_fp32.onnx")
+INT8_ONNX = Path("results/onnx/yolo_int8.onnx")
+IMAGE_SIZE = 640
+NUM_CLASSES = 10
+
+def export_yolo_fp32_onnx(yolo_weight_path, out_fp32_onnx, img_size=640) -> Path:
+    """Stage 2a: export the original raw YOLO model, without embedded NMS."""
+    out_fp32_onnx.parent.mkdir(parents=True, exist_ok=True)
+
+    exported_path = Path(
+        YOLO(str(yolo_weight_path)).export(
+            format="onnx",
+            imgsz=img_size,
+            batch=1,
+            dynamic=False,
+            nms=None,
+        )
+    )
+
+    if exported_path.resolve() != out_fp32_onnx.resolve():
+        out_fp32_onnx.write_bytes(exported_path.read_bytes())
+
+    return out_fp32_onnx
 
 
 
