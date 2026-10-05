@@ -56,6 +56,17 @@ def calibration_loader():
     return get_loader(data_dir=calibration_dir, batch_size=10)
 
 @pytest.fixture(scope="module")
+def predict_args():
+    return {
+        "imgsz": 640,
+        "conf": 0.1,
+        "iou": 0.5,
+        "max_det": 300,
+        "verbose": False,
+        "device": "cpu",
+    }
+
+@pytest.fixture(scope="module")
 def pt2e_adapter():
     model_int8_dir = "results/checkpoint/pt2e/torch_x86_int8.pt2"
     adapter = PT2EYOLOBenchmarkAdapter(pt2_path=model_int8_dir)
@@ -74,8 +85,11 @@ def onnx_int8_path():
 
 
 @pytest.fixture(scope="module")
-def onnx_fp32_adapter(onnx_fp32_path):
+def onnx_fp32_adapter(onnx_fp32_path, predict_args):
     assert onnx_fp32_path.is_file(), (
         f"ONNX model not found: {onnx_fp32_path.resolve()}"
     )
-    return OnnxYoloBenchmarkAdapter(onnx_fp32_path).eval()
+    return OnnxYoloBenchmarkAdapter(onnx_fp32_path,
+                                    conf_threshold=predict_args["conf"],
+                                    iou_threshold=predict_args["iou"],
+                                    image_size=predict_args["imgsz"])

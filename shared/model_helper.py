@@ -1,5 +1,7 @@
+import shutil
 from pathlib import Path
 
+import numpy as np
 import torch
 from ultralytics import YOLO
 import onnxruntime as ort
@@ -99,23 +101,46 @@ IMAGE_SIZE = 640
 NUM_CLASSES = 10
 
 def export_yolo_fp32_onnx(yolo_weight_path, out_fp32_onnx, img_size=640) -> Path:
-    """Stage 2a: export the original raw YOLO model, without embedded NMS."""
+    """Pure raw ONNX export – never inserts NMS."""
+    out_fp32_onnx = Path(out_fp32_onnx)
     out_fp32_onnx.parent.mkdir(parents=True, exist_ok=True)
 
-    exported_path = Path(
-        YOLO(str(yolo_weight_path)).export(
-            format="onnx",
-            imgsz=img_size,
-            batch=1,
-            dynamic=False,
-            nms=None,
-        )
+    # 1. Load the pure nn.Module (no predictor, no post-processing)
+    yolo = YOLO(str(yolo_weight_path))
+    model = yolo.model.float().cpu().eval()
+
+    # 2. Dummy input
+    if isinstance(img_size, (list, tuple)):
+        h, w = img_size[0], img_size[1]
+    else:
+        h = w = int(img_size)
+    dummy = torch.zeros(1, 3, h, w, dtype=torch.float32)
+
+    # 3. Manual torch.onnx.export (this is the only reliable way)
+    torch.onnx.export(
+        model,
+        dummy,
+        str(out_fp32_onnx),
+        opset_version=12,
+        input_names=["images"],
+        output_names=["output0"],
+        dynamic_axes={
+            "images": {0: "batch", 2: "height", 3: "width"},
+            "output0": {0: "batch", 2: "anchors"},
+        },
+        do_constant_folding=True,
     )
 
-    if exported_path.resolve() != out_fp32_onnx.resolve():
-        out_fp32_onnx.write_bytes(exported_path.read_bytes())
+    # 4. Verify real output shape
+    sess = ort.InferenceSession(str(out_fp32_onnx), providers=["CPUExecutionProvider"])
+    out = sess.run(None, {sess.get_inputs()[0].name: dummy.numpy()})[0]
+    print(f"Real output shape after manual export: {out.shape}")
 
+    # Must look like (1, 14, 5040) or (1, 4+nc, anchors)
+    if out.ndim != 3 or out.shape[1] < 10:
+        raise RuntimeError(f"Unexpected shape: {out.shape}")
+
+    print("Success – pure raw ONNX exported.")
     return out_fp32_onnx
-
 
 

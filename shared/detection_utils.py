@@ -86,20 +86,33 @@ def build_model(num_classes: int = NUM_CLASSES, pretrained: bool = True):
     return model
 
 
-def load_detection_model(model_path):
+def load_detection_model(model_path, predict_args):
     model_path = Path(model_path)
     suffix = model_path.suffix.lower()
 
     if suffix == ".pt":
-        return YoloBenchmarkAdapter(yolo_weights_path=str(model_path)).eval()
+        return YoloBenchmarkAdapterPortable(
+            yolo_weights_path=str(model_path),
+            image_size=predict_args["imgsz"],
+            conf_threshold=predict_args["conf"],
+            iou_threshold=predict_args["iou"],
+            max_det=predict_args["max_det"],
+        ).eval()
 
     if suffix == ".onnx":
-        return OnnxYoloBenchmarkAdapter(model_path).eval()
+        return OnnxYoloBenchmarkAdapter(
+            model_path=model_path,
+            image_size=predict_args["imgsz"],
+            num_classes=len(CLASSES),
+            conf_threshold=predict_args["conf"],
+            iou_threshold=predict_args["iou"],
+            max_det=predict_args["max_det"],
+        )
 
     if suffix == ".pt2":
         return PT2EYOLOBenchmarkAdapter(
             pt2_path=str(model_path),
-            image_size=640,
+            image_size=predict_args["imgsz"],
             num_classes=len(CLASSES),
         ).eval()
 

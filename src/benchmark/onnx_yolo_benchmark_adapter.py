@@ -20,9 +20,11 @@ from shared.data_loader import preprocess_yolo_image
 
 
 class OnnxYoloBenchmarkAdapter(nn.Module):
-    """Same benchmark-facing interface for both FP32 and INT8 ONNX."""
+    """Benchmark-facing adapter for FP32 or INT8 Ultralytics ONNX models."""
 
-    def __init__(self, model_path: Path,
+    def __init__(
+        self,
+        model_path: Path,
         image_size: int = 640,
         num_classes: int = 10,
         conf_threshold: float = 0.001,
@@ -30,68 +32,88 @@ class OnnxYoloBenchmarkAdapter(nn.Module):
         max_det: int = 300,
     ) -> None:
         super().__init__()
+
+        self.model_path = Path(model_path)
         self.image_size = image_size
         self.num_classes = num_classes
         self.conf_threshold = conf_threshold
         self.iou_threshold = iou_threshold
         self.max_det = max_det
-        self.model_path = Path(model_path)
-        self.session = ort.InferenceSession(
-            str(self.model_path),
-            providers=["CPUExecutionProvider"],
-        )
-        self.input_name = self.session.get_inputs()[0].name
+
+        if self.model_path.suffix.lower() != ".onnx":
+            raise ValueError(
+                f"Expected an ONNX file, got: {self.model_path}"
+            )
+
+        # Ultralytics handles ONNX Runtime, preprocessing, NMS,
+        # and scaling boxes back to the original image.
+        self.yolo = YOLO(str(self.model_path))
 
     @torch.inference_mode()
-    def forward(self, images: list[Tensor]) -> list[dict[str, Tensor]]:
+    def forward(
+        self,
+        images: list[Tensor],
+    ) -> list[dict[str, Tensor]]:
         if not isinstance(images, list):
             raise TypeError("Expected a list of CHW image tensors")
 
         results = []
-        for image in images:  # Exported ONNX model uses batch size 1.
-            original_hw = tuple(image.shape[-2:])
-            x = preprocess_yolo_image(image)
 
-            if tuple(x.shape) != (1, 3, self.image_size, self.image_size):
-                raise ValueError(f"Unexpected preprocessed shape: {tuple(x.shape)}")
-
-            input_array = np.ascontiguousarray(
-                x.detach().cpu().numpy(),
-                dtype=np.float32,
-            )
-            raw_outputs = self.session.run(
-                None,
-                {self.input_name: input_array},
-            )
-            prediction = torch.from_numpy(raw_outputs[0])
-
-            if prediction.ndim != 3 or prediction.shape[:2] != (
-                1, 4 + self.num_classes
-            ):
-                raise ValueError(
-                    f"Expected raw [1, {4 + self.num_classes}, N], "
-                    f"got {tuple(prediction.shape)}. "
-                    "Check the YOLO export output format."
+        for image in images:
+            if not isinstance(image, Tensor):
+                raise TypeError(
+                    f"Expected torch.Tensor, got {type(image).__name__}"
                 )
 
-            detections = non_max_suppression(
-                prediction,
-                conf_thres=self.conf_threshold,
-                iou_thres=self.iou_threshold,
+            if image.ndim != 3 or image.shape[0] != 3:
+                raise ValueError(
+                    "Expected image shape (3,H,W), "
+                    f"got {tuple(image.shape)}"
+                )
+
+            image = image.detach().cpu().float()
+
+            if image.numel() == 0:
+                raise ValueError("Image tensor is empty")
+
+            if image.min().item() < 0.0 or image.max().item() > 1.0:
+                raise ValueError("Expected image values in [0,1]")
+
+            # Ultralytics can apply its own resize/letterbox preprocessing.
+            source_img = (
+                image.permute(1, 2, 0)
+                .clamp(0.0, 1.0)
+                .mul(255.0)
+                .round()
+                .to(torch.uint8)
+                .numpy()
+            )
+
+            result = self.yolo.predict(
+                #imgsz=self.image_size,
+                source=source_img,
+                conf=self.conf_threshold,
+                iou=self.iou_threshold,
+                agnostic_nms=False,
+                rect=False,
+                verbose=False,
+                device="cpu",
                 max_det=self.max_det,
-                nc=self.num_classes,
-                end2end=False,
             )[0]
 
-            boxes = ops.scale_boxes(
-                x.shape[2:],
-                detections[:, :4].clone(),
-                original_hw,
-            )
+            boxes_xyxy = result.boxes.xyxy.to(dtype=torch.float32, device="cpu")
+            scores = result.boxes.conf.to(dtype=torch.float32, device="cpu")
+            labels_1_to_10 = (result.boxes.cls.to(dtype=torch.int64, device="cpu") + 1)
+
+            if boxes_xyxy.numel() == 0:
+                boxes_xyxy = torch.empty((0, 4), dtype=torch.float32)
+                scores = torch.empty((0,), dtype=torch.float32)
+                labels_1_to_10 = torch.empty((0,), dtype=torch.int64)
+
             results.append({
-                "boxes": boxes.float(),
-                "scores": detections[:, 4].float(),
-                "labels": detections[:, 5].long() + 1,
+                "boxes": boxes_xyxy.reshape(-1, 4),
+                "scores": scores.reshape(-1),
+                "labels": labels_1_to_10.reshape(-1),
             })
 
         return results

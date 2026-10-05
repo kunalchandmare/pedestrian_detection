@@ -24,11 +24,15 @@ class YoloBenchmarkAdapter(nn.Module):
         yolo_weights_path: str,
         conf_threshold: float = 0.001,
         iou_threshold: float = 0.7,
+        max_det: int = 300,
+        image_size: int = 640,
     ) -> None:
         super().__init__()
         self.yolo_weights_path = str(Path(yolo_weights_path).expanduser().resolve())
         self.conf_threshold = float(conf_threshold)
         self.iou_threshold = float(iou_threshold)
+        self.max_det = int(max_det)
+        self.image_size = int(image_size)
         self._yolo = None
 
     def _ensure_yolo(self) -> YOLO:
@@ -55,14 +59,25 @@ class YoloBenchmarkAdapter(nn.Module):
 
         # Convert CHW float [0,1] RGB tensor to HWC uint8 RGB image so
         # Ultralytics can apply its own resize/letterbox preprocessing.
-        source_img = (img.permute(1, 2, 0).clamp(0.0, 1.0) * 255.0).to(torch.uint8).numpy()
+        source_img = (
+            image.permute(1, 2, 0)
+            .clamp(0.0, 1.0)
+            .mul(255.0)
+            .round()
+            .to(torch.uint8)
+            .numpy()
+        )
 
         result = yolo.predict(
+           # imgsz=self.image_size,
             source=source_img,
             conf=self.conf_threshold,
             iou=self.iou_threshold,
+            agnostic_nms=False,
+            rect=False,
             verbose=False,
             device="cpu",
+            max_det=self.max_det,
         )[0]
 
         boxes_xyxy = result.boxes.xyxy.to(dtype=torch.float32, device="cpu")

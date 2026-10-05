@@ -42,7 +42,17 @@ RANDOM_SEED = 42
 BENCHMARK_EVAL_SIZE = 200      # self-check sample (smaller than the moderator)
 INFER_BATCH = 4
 
-
+def predict_args():
+    return {
+        "imgsz": 640,
+        "conf": 0.001,
+        "iou": 0.5,
+        "max_det": 300,
+        "agnostic_nms": False,
+        "rect": False,
+        "verbose": False,
+        "device": "cpu",
+    }
 # ============================================================================
 # DATASET
 # ============================================================================
@@ -90,11 +100,22 @@ def load_dataset(num_samples: int, seed: int, log=print):
     log(f"Loaded {len(images)} images from Student_Data")
     return images, targets
 
+def _is_ultralytics_onnx(model):
+    """Return True for an Ultralytics YOLO wrapper loaded from ONNX."""
+    yolo = getattr(model, "yolo", model)
+    model_path = getattr(yolo, "ckpt_path", None)
+
+    return (
+        isinstance(model_path, str)
+        and model_path.lower().endswith(".onnx")
+    )
 
 def run_inference(model, images, log=print):
     """Run the detector and return predictions as numpy dicts."""
     preds = []
-    model.eval()
+    # PyTorch adapters need eval(); Ultralytics ONNX models do not.
+    if hasattr(model, "eval") and not _is_ultralytics_onnx(model):
+        model.eval()
     with torch.no_grad():
         for start in range(0, len(images), INFER_BATCH):
             batch = images[start:start + INFER_BATCH]
@@ -174,7 +195,7 @@ def main():
         status.update(label="Loading model...")
         st.write(f"Loading model from `{model_path}`")
         try:
-            model = load_detection_model(model_path)
+            model = load_detection_model(model_path,predict_args())
         except Exception as e:
             status.update(label="Failed", state="error")
             st.error(f"Could not load the model: {e}")
