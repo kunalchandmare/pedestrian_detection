@@ -1,22 +1,12 @@
 from pathlib import Path
-from typing import Callable, Iterable
-
-import numpy as np
-import onnxruntime as ort
 import torch
 from torch import Tensor, nn
 from ultralytics import YOLO
-from ultralytics.utils import ops
+import numpy as np
+import onnxruntime as ort
+from ultralytics.data.augment import LetterBox
 from ultralytics.utils.nms import non_max_suppression
-
-from onnxruntime.quantization import (
-    CalibrationDataReader,
-    QuantFormat,
-    QuantType,
-    quantize_static,
-)
-
-from shared.data_loader import preprocess_yolo_image
+from ultralytics.utils.ops import scale_boxes
 
 
 class OnnxYoloBenchmarkAdapter(nn.Module):
@@ -51,8 +41,8 @@ class OnnxYoloBenchmarkAdapter(nn.Module):
 
     @torch.inference_mode()
     def forward(
-        self,
-        images: list[Tensor],
+            self,
+            images: list[Tensor],
     ) -> list[dict[str, Tensor]]:
         if not isinstance(images, list):
             raise TypeError("Expected a list of CHW image tensors")
@@ -60,26 +50,22 @@ class OnnxYoloBenchmarkAdapter(nn.Module):
         results = []
 
         for image in images:
-            if not isinstance(image, Tensor):
-                raise TypeError(
-                    f"Expected torch.Tensor, got {type(image).__name__}"
-                )
+            image = image.detach().cpu().float()
 
             if image.ndim != 3 or image.shape[0] != 3:
                 raise ValueError(
-                    "Expected image shape (3,H,W), "
-                    f"got {tuple(image.shape)}"
+                    f"Expected image shape (3,H,W), got {tuple(image.shape)}"
                 )
-
-            image = image.detach().cpu().float()
 
             if image.numel() == 0:
                 raise ValueError("Image tensor is empty")
 
+            if not torch.isfinite(image).all():
+                raise ValueError("Image contains NaN or Inf")
+
             if image.min().item() < 0.0 or image.max().item() > 1.0:
                 raise ValueError("Expected image values in [0,1]")
 
-            # Ultralytics can apply its own resize/letterbox preprocessing.
             source_img = (
                 image.permute(1, 2, 0)
                 .clamp(0.0, 1.0)
@@ -90,8 +76,8 @@ class OnnxYoloBenchmarkAdapter(nn.Module):
             )
 
             result = self.yolo.predict(
-                #imgsz=self.image_size,
                 source=source_img,
+                imgsz=self.image_size,
                 conf=self.conf_threshold,
                 iou=self.iou_threshold,
                 agnostic_nms=False,
@@ -101,19 +87,20 @@ class OnnxYoloBenchmarkAdapter(nn.Module):
                 max_det=self.max_det,
             )[0]
 
-            boxes_xyxy = result.boxes.xyxy.to(dtype=torch.float32, device="cpu")
-            scores = result.boxes.conf.to(dtype=torch.float32, device="cpu")
-            labels_1_to_10 = (result.boxes.cls.to(dtype=torch.int64, device="cpu") + 1)
-
-            if boxes_xyxy.numel() == 0:
-                boxes_xyxy = torch.empty((0, 4), dtype=torch.float32)
-                scores = torch.empty((0,), dtype=torch.float32)
-                labels_1_to_10 = torch.empty((0,), dtype=torch.int64)
+            if result.boxes is None or len(result.boxes) == 0:
+                results.append({
+                    "boxes": torch.empty((0, 4), dtype=torch.float32),
+                    "scores": torch.empty((0,), dtype=torch.float32),
+                    "labels": torch.empty((0,), dtype=torch.int64),
+                })
+                continue
 
             results.append({
-                "boxes": boxes_xyxy.reshape(-1, 4),
-                "scores": scores.reshape(-1),
-                "labels": labels_1_to_10.reshape(-1),
+                "boxes": result.boxes.xyxy.detach().cpu().float().reshape(-1, 4),
+                "scores": result.boxes.conf.detach().cpu().float().reshape(-1),
+                "labels": (
+                        result.boxes.cls.detach().cpu().long() + 1
+                ).reshape(-1),
             })
 
         return results

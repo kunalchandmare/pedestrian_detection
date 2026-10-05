@@ -69,7 +69,7 @@ class YoloBenchmarkAdapter(nn.Module):
         )
 
         result = yolo.predict(
-           # imgsz=self.image_size,
+            imgsz=self.image_size,
             source=source_img,
             conf=self.conf_threshold,
             iou=self.iou_threshold,

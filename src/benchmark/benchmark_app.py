@@ -138,7 +138,7 @@ def find_models(base_dir: Path) -> dict:
     if base_dir.exists():
         for root, _dirs, files in os.walk(base_dir):
             for f in files:
-                if f.endswith(".pt"):
+                if f.lower().endswith((".pt", ".pt2", ".onnx")):
                     p = Path(root) / f
                     models[os.path.relpath(p, base_dir)] = str(p)
     return models
@@ -148,7 +148,11 @@ def find_models(base_dir: Path) -> dict:
 # STREAMLIT APP
 # ============================================================================
 def main():
-    st.set_page_config(page_title="Student Self-Check Benchmark", layout="wide")
+    st.set_page_config(
+        page_title="Student Self-Check Benchmark",
+        layout="wide",
+    )
+
     st.title("Pedestrian / Object Detection - Student Self-Check")
     st.caption(
         "Confirms your detector loads and runs through the benchmark pipeline. "
@@ -156,76 +160,217 @@ def main():
     )
 
     st.sidebar.header("Configuration")
+
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     all_models = find_models(MODELS_DIR)
 
     st.sidebar.subheader("1. Select your model")
+
     if all_models:
-        selected = st.sidebar.selectbox("Models found in Students/Models", sorted(all_models))
+        selected = st.sidebar.selectbox(
+            "Models found in Students/Models",
+            sorted(all_models),
+        )
         model_path = all_models[selected]
     else:
-        st.sidebar.warning(f"No .pt models found in {MODELS_DIR}")
-        st.sidebar.info("Train a model first (python Students/train_model.py) "
-                        "or enter a path below.")
-        model_path = st.sidebar.text_input("Model path")
+        st.sidebar.warning(
+            f"No models found in {MODELS_DIR}"
+        )
+        st.sidebar.info(
+            "Train a model first or upload a model below."
+        )
+        model_path = None
 
-    uploaded = st.sidebar.file_uploader("Or upload a model", type=["pt","pt2", "onnx"])
-    if uploaded:
-        model_path = str(MODELS_DIR / uploaded.name)
+    uploaded_model = st.sidebar.file_uploader(
+        "Upload model",
+        type=["pt", "pt2", "onnx"],
+        key="model_file",
+    )
+
+    uploaded_data = st.sidebar.file_uploader(
+        "Upload ONNX external data if required",
+        type=["data"],
+        key="onnx_data_file",
+    )
+
+    if uploaded_model is not None:
+        model_path = MODELS_DIR / uploaded_model.name
+
         with open(model_path, "wb") as f:
-            f.write(uploaded.getbuffer())
-        st.sidebar.success(f"Saved {uploaded.name}")
+            f.write(uploaded_model.getbuffer())
+
+        st.sidebar.success(
+            f"Saved model: {uploaded_model.name}"
+        )
+
+        if uploaded_model.name.lower().endswith(".onnx"):
+            if uploaded_data is not None:
+                data_path = Path(
+                    str(model_path) + ".data"
+                )
+
+                with open(data_path, "wb") as f:
+                    f.write(uploaded_data.getbuffer())
+
+                st.sidebar.success(
+                    f"Saved external data: {data_path.name}"
+                )
+            else:
+                st.sidebar.info(
+                    "No external data file uploaded. "
+                    "This is fine if the ONNX file is self-contained."
+                )
 
     st.sidebar.subheader("2. Settings")
-    pedestrians_only = st.sidebar.checkbox("Evaluate pedestrians only", value=False)
-    n_samples = st.sidebar.slider("Images to evaluate", 50, 500, BENCHMARK_EVAL_SIZE, 50)
 
-    run = st.sidebar.button("Run benchmark", use_container_width=True)
+    pedestrians_only = st.sidebar.checkbox(
+        "Evaluate pedestrians only",
+        value=False,
+    )
+
+    n_samples = st.sidebar.slider(
+        "Images to evaluate",
+        50,
+        500,
+        BENCHMARK_EVAL_SIZE,
+        50,
+    )
+
+    run = st.sidebar.button(
+        "Run benchmark",
+        use_container_width=True,
+    )
 
     if not run:
-        st.info("Select a model in the sidebar and click **Run benchmark**.")
+        st.info(
+            "Select or upload a model and click **Run benchmark**."
+        )
         _show_help()
         return
 
-    if not model_path or not os.path.exists(model_path):
-        st.error(f"Model not found: {model_path or '(no path given)'}")
+    if model_path is None:
+        st.error("Please select or upload a model.")
         return
 
-    with st.status("Running benchmark...", expanded=True) as status:
+    model_path = Path(model_path).resolve()
+
+    if not model_path.exists():
+        st.error(f"Model not found: {model_path}")
+        return
+
+    if model_path.suffix.lower() == ".onnx":
+        data_path = Path(str(model_path) + ".data")
+
+        if data_path.exists():
+            st.info(
+                f"Using ONNX external data: `{data_path.name}`"
+            )
+
+    with st.status(
+        "Running benchmark...",
+        expanded=True,
+    ) as status:
         status.update(label="Loading model...")
         st.write(f"Loading model from `{model_path}`")
+
         try:
-            model = load_detection_model(model_path,predict_args())
+            model = load_detection_model(
+                model_path,
+                predict_args(),
+            )
         except Exception as e:
-            status.update(label="Failed", state="error")
+            status.update(
+                label="Failed",
+                state="error",
+            )
             st.error(f"Could not load the model: {e}")
+            st.exception(e)
             return
-        st.write(f"Model loaded - {count_params(model):,} parameters")
+
+        st.write(
+            f"Model loaded - {count_params(model):,} parameters"
+        )
 
         status.update(label="Loading dataset...")
-        images, targets = load_dataset(n_samples, RANDOM_SEED, log=st.write)
+
+        images, targets = load_dataset(
+            n_samples,
+            RANDOM_SEED,
+            log=st.write,
+        )
+
         if not images:
-            status.update(label="Failed", state="error")
-            st.error(f"No images loaded. Make sure Student_Data is at:\n{DATA_DIR}")
+            status.update(
+                label="Failed",
+                state="error",
+            )
+            st.error(
+                "No images loaded. Make sure Student_Data "
+                f"is at:\n{DATA_DIR}"
+            )
             return
 
         status.update(label="Running inference...")
+
         try:
-            predictions = run_inference(model, images, log=st.write)
+            predictions = run_inference(
+                model,
+                images,
+                log=st.write,
+            )
         except Exception as e:
-            status.update(label="Failed", state="error")
+            status.update(
+                label="Failed",
+                state="error",
+            )
             st.error("Benchmark failed")
             st.exception(e)
             return
 
-        status.update(label="Scoring...")
-        class_filter = PEDESTRIAN_LABELS if pedestrians_only else None
-        results = evaluate_detections(predictions, targets, class_filter=class_filter)
-        scores = calculate_scores(results, model)
-        status.update(label="Benchmark complete", state="complete")
+        if len(predictions) != len(images):
+            status.update(
+                label="Failed",
+                state="error",
+            )
+            st.error(
+                "The model returned an incorrect number of predictions: "
+                f"{len(predictions)} for {len(images)} images."
+            )
+            return
 
-    st.success("Benchmark complete - your model is compatible with the pipeline.")
-    _render_results(results, scores, len(images))
+        status.update(label="Scoring...")
+
+        class_filter = (
+            PEDESTRIAN_LABELS
+            if pedestrians_only
+            else None
+        )
+
+        results = evaluate_detections(
+            predictions,
+            targets,
+            class_filter=class_filter,
+        )
+
+        scores = calculate_scores(
+            results,
+            model,
+        )
+
+        status.update(
+            label="Benchmark complete",
+            state="complete",
+        )
+
+    st.success(
+        "Benchmark complete - your model is compatible with the pipeline."
+    )
+
+    _render_results(
+        results,
+        scores,
+        len(images),
+    )
 
 
 def _render_results(results, scores, n_images):
