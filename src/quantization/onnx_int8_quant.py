@@ -43,7 +43,7 @@ class YoloCalibrationReader(CalibrationDataReader):
         }
 
 
-def calibration_images(
+def calibrate(
     data_dir: str | Path,
     max_images: int = 200,
 ) -> Iterable[Tensor]:
@@ -88,10 +88,45 @@ def quantize_onnx(
     int8_path: Path,
     calib_img_path: Path,
     img_size=640,
+    exclude_nodes: list[str] | None = None,
+    exclude_ops: list[str] | None = None,
 ) -> Path:
-    """Stage 3: static INT8 PTQ with representative images."""
+
+    if exclude_nodes is None:
+        exclude_nodes = []
+    fp32_path = fp32_path.expanduser().resolve()
+    int8_path = int8_path.expanduser().resolve()
+
+    if not fp32_path.is_file():
+        raise FileNotFoundError(
+            f"FP32 ONNX model not found: {fp32_path}"
+        )
+
+    if fp32_path.suffix.lower() != ".onnx":
+        raise ValueError(
+            f"Expected an ONNX input, got: {fp32_path}"
+        )
+
+    # Check the common external-data sidecar.
+    fp32_data_path = Path(str(fp32_path) + ".data")
+
+    if fp32_data_path.exists():
+        print(f"Using external FP32 weights: {fp32_data_path}")
+    else:
+        print("FP32 model has no .onnx.data sidecar, or uses embedded weights.")
+
     int8_path.parent.mkdir(parents=True, exist_ok=True)
-    calibrate_imgs = calibration_images(calib_img_path)
+
+    # Remove stale output files.
+    if int8_path.exists():
+        int8_path.unlink()
+
+    int8_data_path = Path(str(int8_path) + ".data")
+    if int8_data_path.exists():
+        int8_data_path.unlink()
+
+    """"Stage 3: static INT8 PTQ with representative images."""
+    calibrate_imgs = calibrate(calib_img_path)
 
     reader = YoloCalibrationReader(model_path=fp32_path, img_size=img_size, images=calibrate_imgs)
 
@@ -102,6 +137,11 @@ def quantize_onnx(
         quant_format=QuantFormat.QDQ,
         activation_type=QuantType.QUInt8,
         weight_type=QuantType.QInt8,
+        per_channel=True,
+        reduce_range=True,
+        use_external_data_format=False,
+        nodes_to_exclude=list(exclude_nodes or []),
+        op_types_to_quantize=list(exclude_ops or []),
     )
     return int8_path
 

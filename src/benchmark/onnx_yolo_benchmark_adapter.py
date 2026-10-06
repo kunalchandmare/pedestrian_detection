@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import onnx
 import torch
 from torch import Tensor, nn
 from ultralytics import YOLO
@@ -37,7 +39,17 @@ class OnnxYoloBenchmarkAdapter(nn.Module):
 
         # Ultralytics handles ONNX Runtime, preprocessing, NMS,
         # and scaling boxes back to the original image.
-        self.yolo = YOLO(str(self.model_path))
+        self.model_path = Path(model_path).expanduser().resolve()
+
+        if self.model_path.suffix.lower() != ".onnx":
+            raise ValueError(
+                f"Expected an ONNX file, got: {self.model_path}"
+            )
+
+        self.yolo = YOLO(
+            str(self.model_path),
+            task="detect",
+        )
 
     @torch.inference_mode()
     def forward(
@@ -104,3 +116,22 @@ class OnnxYoloBenchmarkAdapter(nn.Module):
             })
 
         return results
+
+    def print_onnx_nodes(self) -> None:
+        """
+        Print all nodes in the ONNX graph.
+
+        Useful for inspecting the FP32 or INT8 model and identifying
+        detection-head nodes to exclude from quantization.
+        """
+        model = onnx.load(str(self.model_path))
+
+        print(f"Model: {self.model_path}")
+        print(f"Number of nodes: {len(model.graph.node)}")
+
+        for index, node in enumerate(model.graph.node):
+            print(
+                f"{index:04d} | "
+                f"name={node.name!r} | "
+                f"type={node.op_type}"
+            )
